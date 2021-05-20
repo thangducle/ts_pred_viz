@@ -47,7 +47,7 @@ class WindowGenerator():
             f'Label indices: {self.label_indices}',
             f'Label column name(s): {self.label_columns}'])
 
-    def window_maker(self, data_matrix):
+    def input_window_maker(self, data_matrix):
         """
         Make window function
         This function extract timestamp as features.
@@ -69,41 +69,66 @@ class WindowGenerator():
         inputs.set_shape([None, self.input_width, None])
         labels.set_shape([None, self.label_width, None])
 
-        return inputs, labels
+        return inputs
 
-    def plot(self, model=None, plot_col='close', max_subplots=3):
+    def output_window_maker(self, data_matrix):
         """
-        Plot function
+        Make window function
+        This function extract timestamp as features.
+        It also extract timestamp as labels
+        Args:
+
+        Output:
+            inputs: index of features in input matrix
+            labels: index of label in input matrix
         """
-        inputs, labels = self.example
-        print("len of input", len(inputs))
-        plt.figure(figsize=(12, 8))
-        plot_col_index = self.column_indices[plot_col]
-        max_n = min(max_subplots, len(inputs))
-        for n in range(max_n):
-            plt.subplot(max_n, 1, n+1)
-            plt.ylabel(f'{plot_col} [normed]')
-            plt.plot(self.input_indices, inputs[n, :, plot_col_index],label='Inputs', marker='.', zorder=-10)
+        inputs = data_matrix[:, self.input_slice, :]  # extract inputs data using indexes
+        labels = data_matrix[:, self.labels_slice, :]  # extract labels data using indexes
+        if self.label_columns is not None:
+            labels = tf.stack([labels[:, :, self.column_indices[name]] for name in self.label_columns],axis=-1)
+        
+        
+        # Slicing doesn't preserve static shape information, so set the shapes
+        # manually. This way the `tf.data.Datasets` are easier to inspect.
+        inputs.set_shape([None, self.input_width, None])
+        labels.set_shape([None, self.label_width, None])
 
-            if self.label_columns:
-                label_col_index = self.label_columns_indices.get(plot_col, None)
-            else:
-                label_col_index = plot_col_index
+        return labels
 
-            if label_col_index is None:
-                continue
 
-            plt.scatter(self.label_indices, labels[n, :, label_col_index], edgecolors='k', label='Labels', c='#2ca02c', s=64)
-            if model is not None:
-                predictions = model(inputs)
-                print(predictions.shape)
-                print(len(self.label_indices))
-                plt.scatter(self.label_indices, predictions[n, :], marker='X', edgecolors='k', label='Predictions', c='#ff7f0e', s=64)
+    # def plot(self, model=None, plot_col='close', max_subplots=3):
+    #     """
+    #     Plot function
+    #     """
+    #     inputs, labels = self.example
+    #     print("len of input", len(inputs))
+    #     plt.figure(figsize=(12, 8))
+    #     plot_col_index = self.column_indices[plot_col]
+    #     max_n = min(max_subplots, len(inputs))
+    #     for n in range(max_n):
+    #         plt.subplot(max_n, 1, n+1)
+    #         plt.ylabel(f'{plot_col} [normed]')
+    #         plt.plot(self.input_indices, inputs[n, :, plot_col_index],label='Inputs', marker='.', zorder=-10)
 
-            if n == 0:
-                plt.legend()
+    #         if self.label_columns:
+    #             label_col_index = self.label_columns_indices.get(plot_col, None)
+    #         else:
+    #             label_col_index = plot_col_index
 
-        plt.xlabel('Time [h]')
+    #         if label_col_index is None:
+    #             continue
+
+    #         plt.scatter(self.label_indices, labels[n, :, label_col_index], edgecolors='k', label='Labels', c='#2ca02c', s=64)
+    #         if model is not None:
+    #             predictions = model(inputs)
+    #             print(predictions.shape)
+    #             print(len(self.label_indices))
+    #             plt.scatter(self.label_indices, predictions[n, :], marker='X', edgecolors='k', label='Predictions', c='#ff7f0e', s=64)
+
+    #         if n == 0:
+    #             plt.legend()
+
+    #     plt.xlabel('Time [h]')
 
     def make_dataset(self, data):
         """
@@ -123,9 +148,10 @@ class WindowGenerator():
             shuffle=True,
             batch_size=32,)  # hardcore batchsize, need to change later
 
-        ds = ds.map(self.window_maker)
+        ds_in = ds.map(self.input_window_maker)
+        ds_label = ds.map(self.output_window_maker)
 
-        return ds
+        return ds_in, ds_label
 
     @property
     def train(self):
@@ -142,10 +168,8 @@ class WindowGenerator():
     @property
     def example(self):
         """Get and cache an example batch of `inputs, labels` for plotting."""
-        result = getattr(self, '_example', None)
-        if result is None:
-            # No example batch was found, so get one from the `.train` dataset
-            result = next(iter(self.train))
-            # And cache it for next time
-            self._example = result
-        return result
+        # No example batch was found, so get one from the `.train` dataset
+        result_in, result_label = next(iter(self.train[0])), next(iter(self.train[1]))
+        # And cache it for next time
+        self._example = [result_in, result_label]
+        return [result_in, result_label]
